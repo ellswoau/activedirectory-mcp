@@ -119,9 +119,12 @@ def register(mcp: "FastMCP", config: "ADConfig") -> None:
 
 def _account_uac_flags(config: "ADConfig", username: str) -> dict:
     """Best-effort read of the account lock/USC flags for a username, used to
-    double-confirm an unlock rather than guessing."""
+    double-confirm an unlock rather than guessing.
+
+    Reads both the ``userAccountControl`` LOCKOUT bit and ``lockoutTime`` so
+    either signal can report the account as locked (see ``is_locked_out``)."""
     session = get_client(config).session()
     user = session.find_user_by_sam_name(username, attributes_to_lookup=USER_INFO_ATTRS)
     if user is None:
         return {}
-    return uac_flags(user.get("userAccountControl"))
+    return uac_flags(user.get("userAccountControl"), user.get("lockoutTime"))

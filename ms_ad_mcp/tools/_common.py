@@ -14,11 +14,13 @@ USER_INFO_ATTRS = [
     "displayName", "givenName", "sn", "mail", "manager", "title",
     "department", "telephoneNumber", "description",
     "lastLogon", "lastLogonTimestamp", "whenChanged", "userAccountControl",
+    "lockoutTime",
 ]
 GROUP_INFO_ATTRS = ["description", "displayName", "mail"]
 COMPUTER_INFO_ATTRS = [
     "dNSHostName", "operatingSystem", "operatingSystemVersion", "description",
     "lastLogon", "lastLogonTimestamp", "whenChanged", "userAccountControl",
+    "lockoutTime",
     "canonicalName", "servicePrincipalName",
 ]
 
@@ -98,14 +100,51 @@ def _parse_generalized(s: str):
     return _dt.datetime(year, month, day, hour, minute, second, micro, tzinfo=tz)
 
 
-def uac_flags(value: object) -> Dict[str, bool]:
-    """Decode the common AD ``userAccountControl`` flags we care about."""
+def lockout_time_active(value: object) -> bool:
+    """True when the AD ``lockoutTime`` attribute says the account is locked.
+
+    ``lockoutTime`` is Windows FILETIME ticks (100ns since 1601-01-01 UTC).
+    ``0`` (or missing) means not locked; any non-zero value means the account
+    was locked out. Unlike the ``userAccountControl`` LOCKOUT bit, this
+    attribute is replicated between domain controllers, so it is a second,
+    independent signal for lockout.
+    """
+    try:
+        return int(value) > 0
+    except (TypeError, ValueError):
+        return False
+
+
+def is_locked_out(uac_value: object, lockout_time: object = None) -> bool:
+    """Evaluate every available lockout signal and return True if ANY says the
+    account is locked.
+
+    Signals checked:
+
+    * the ``userAccountControl`` LOCKOUT bit (0x10) -- a per-DC derived flag;
+    * a non-zero ``lockoutTime`` -- the replicated lockout attribute.
+
+    OR-ing the two means a lockout reported by either method forces the
+    account to be treated as locked, instead of the two disagreeing.
+    """
+    try:
+        uac_flagged = bool(int(uac_value) & 0x10)
+    except (TypeError, ValueError):
+        uac_flagged = False
+    return uac_flagged or lockout_time_active(lockout_time)
+
+
+def uac_flags(value: object, lockout_time: object = None) -> Dict[str, bool]:
+    """Decode the common AD ``userAccountControl`` flags we care about.
+
+    ``locked_out`` is the OR of the LOCKOUT bit and a non-zero ``lockoutTime``
+    (see :func:`is_locked_out`) so both detection methods are honoured."""
     try:
         n = int(value)
     except (TypeError, ValueError):
         return {}
     return {
-        "locked_out": bool(n & 0x10),          # LOCKOUT
+        "locked_out": is_locked_out(n, lockout_time),
         "password_expired": bool(n & 0x800000),  # PASSWORD_EXPIRED
         "disabled": bool(n & 0x2),             # ACCOUNTDISABLE
         "dont_expire_password": bool(n & 0x10000),
@@ -137,8 +176,10 @@ def summarize_user(user: ADUser, include_uac: bool = True) -> Dict[str, object]:
     ll = user.get("lastLogon")
     out["lastLogon"] = windows_time_to_iso(ll) if ll else None
     out["lastLogon_raw"] = ll
+    out["lockoutTime"] = user.get("lockoutTime")
     if include_uac:
-        out["account_flags"] = uac_flags(user.get("userAccountControl"))
+        out["account_flags"] = uac_flags(user.get("userAccountControl"),
+                                         user.get("lockoutTime"))
     return out
 
 
@@ -148,7 +189,9 @@ def summarize_computer(comp: ADComputer) -> Dict[str, object]:
                            "operatingSystemVersion", "description",
                            "canonicalName", "lastLogonTimestamp")
     out["service_principal_names"] = comp.get("servicePrincipalName")
-    out["account_flags"] = uac_flags(comp.get("userAccountControl"))
+    out["account_flags"] = uac_flags(comp.get("userAccountControl"),
+                                     comp.get("lockoutTime"))
+    out["lockoutTime"] = comp.get("lockoutTime")
     ll = comp.get("lastLogon")
     out["lastLogon"] = windows_time_to_iso(ll) if ll else None
     out["lastLogon_raw"] = ll

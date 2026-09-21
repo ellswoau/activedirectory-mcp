@@ -23,6 +23,8 @@ from ms_ad_mcp.dnsclient import reverse_dns_lookup  # noqa: E402
 from ms_ad_mcp.server import build_server  # noqa: E402
 from ms_ad_mcp.tools._common import (  # noqa: E402
     generalized_time_to_iso,
+    is_locked_out,
+    lockout_time_active,
     rdn_of_dn,
     uac_flags,
     windows_time_to_iso,
@@ -84,6 +86,33 @@ def test_uac_flags():
     flags = uac_flags(764)  # 0x16c -> locked(0x10) + disabled(0x2) + ... 
     assert flags["locked_out"] is True
     assert flags["password_expired"] is False
+
+
+def test_lockout_time_active():
+    assert lockout_time_active(0) is False
+    assert lockout_time_active(None) is False
+    assert lockout_time_active("0") is False
+    assert lockout_time_active(133134107830000000) is True
+    assert lockout_time_active("garbage") is False
+
+
+def test_locked_out_uses_both_signals():
+    # UAC LOCKOUT bit only -> locked.
+    assert is_locked_out(0x10, 0) is True
+    # lockoutTime only (UAC bit clear) -> locked.
+    assert is_locked_out(0x10000, 133134107830000000) is True
+    # neither -> not locked.
+    assert is_locked_out(0x10000, 0) is False
+    # unparseable UAC but an active lockoutTime -> still locked.
+    assert is_locked_out(None, 133134107830000000) is True
+
+
+def test_uac_flags_lockout_time_forces_true():
+    # UAC has no LOCKOUT bit but lockoutTime is set: must report locked.
+    flags = uac_flags(0x10000, 133134107830000000)
+    assert flags["locked_out"] is True
+    # And the reverse: LOCKOUT bit set, lockoutTime clear.
+    assert uac_flags(0x10, 0)["locked_out"] is True
 
 
 def test_rdn():
