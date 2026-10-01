@@ -126,12 +126,89 @@ def test_tool_registration():
     tools = asyncio.run(mcp.list_tools())
     names = {t.name for t in tools}
     required = {
-        "unlock_account", "reset_password", "change_password", "create_user",
+        "unlock_account", "enable_account", "disable_account",
+        "reset_password", "change_password", "create_user",
         "find_user", "find_computer", "user_group_memberships",
         "add_user_to_group", "get_manager", "reverse_dns_lookup",
         "last_logon_for_hostname", "ad_ping", "ad_config",
     }
     assert required <= names, f"missing tools: {required - names}"
+
+
+class _FakeUser:
+    def __init__(self, flags):
+        self._flags = flags
+
+    def get(self, key, **kwargs):
+        return self._flags.get(key)
+
+
+class _FakeSession:
+    def __init__(self, flags):
+        self.calls = []
+        self._flags = flags
+
+    def enable_account(self, name):
+        self.calls.append(("enable_account", name))
+        return True
+
+    def disable_account(self, name):
+        self.calls.append(("disable_account", name))
+        return True
+
+    def find_user_by_sam_name(self, name, attributes_to_lookup=None):
+        return _FakeUser(self._flags)
+
+
+class _FakeClient:
+    def __init__(self, session):
+        self._s = session
+
+    def session(self):
+        return self._s
+
+
+def _account_tool(mcp, name):
+    """Return the callable behind a registered tool by name."""
+    import asyncio
+    for t in asyncio.run(mcp.list_tools()):
+        if t.name == name:
+            return t.fn
+    raise AssertionError(f"tool {name} is not registered")
+
+
+def _call_account_tool(tool_name, username, flags):
+    """Invoke an account tool against a fake session; return (out, session)."""
+    import unittest.mock as mock
+    cfg = load_config()
+    mcp = build_server(config=cfg)
+    fn = _account_tool(mcp, tool_name)
+    session = _FakeSession(flags)
+    with mock.patch("ms_ad_mcp.tools.account_tools.get_client",
+                    return_value=_FakeClient(session)):
+        out = fn(username)
+    return out, session
+
+
+def test_enable_account_tool():
+    # After a successful enable the ACCOUNTDISABLE bit is clear.
+    flags = {"userAccountControl": 0x0, "lockoutTime": 0}
+    out, session = _call_account_tool("enable_account", "jsmith", flags)
+    assert session.calls == [("enable_account", "jsmith")], session.calls
+    assert out["enabled"] is True
+    assert out["account"] == "jsmith"
+    # Compare against the decoder, not a literal, to survive sanitization.
+    assert out["disabled_flag_after"] == uac_flags(0x0, 0)["disabled"]
+
+
+def test_disable_account_tool():
+    # After a successful disable the ACCOUNTDISABLE bit is set.
+    flags = {"userAccountControl": 0x2, "lockoutTime": 0}
+    out, session = _call_account_tool("disable_account", "jsmith", flags)
+    assert session.calls == [("disable_account", "jsmith")], session.calls
+    assert out["disabled"] is True
+    assert out["account"] == "jsmith"
+    assert out["disabled_flag_after"] == uac_flags(0x2, 0)["disabled"]
 
 
 def test_reverse_dns_smoke():

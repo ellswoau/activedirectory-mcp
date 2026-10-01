@@ -1,4 +1,5 @@
-"""Account-management tools: unlock, password changes and user creation."""
+"""Account-management tools: unlock, enable/disable, password changes and
+user creation."""
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Optional
@@ -32,6 +33,55 @@ def register(mcp: "FastMCP", config: "ADConfig") -> None:
             "account": username,
             "locked_flag_after": flags.get("locked_out"),
             "note": "Account unlocked. Ask the user to sign in with a fresh password.",
+        }
+
+    @mcp.tool()
+    def enable_account(username: str) -> dict:
+        """Enable a disabled AD user (or computer) account by its
+        sAMAccountName (or distinguished name / common name). AD disables an
+        account by setting the ACCOUNTDISABLE bit in ``userAccountControl``;
+        this clears that bit so the account can authenticate again. Reports the
+        result and whether the account is still flagged as disabled."""
+        session = get_client(config).session()
+        with _wrap(f"enabling account '{username}'"):
+            ok = session.enable_account(username)
+        flags = {}
+        try:
+            flags = _account_uac_flags(config, username)
+        except ADError:
+            pass
+        return {
+            "enabled": bool(ok),
+            "account": username,
+            "disabled_flag_after": flags.get("disabled"),
+            "note": "Account enabled (ACCOUNTDISABLE cleared). The user can "
+                    "sign in again, subject to password expiry/lockout.",
+        }
+
+    @mcp.tool()
+    def disable_account(username: str) -> dict:
+        """Disable an AD user (or computer) account by its sAMAccountName (or
+        distinguished name / common name). This is the supported alternative to
+        deleting an account: the object is retained (group memberships, mailbox
+        links, profile data) but the user can no longer sign in. AD disables an
+        account by setting the ACCOUNTDISABLE bit in ``userAccountControl``;
+        this sets that bit. Reports the result and whether the account is still
+        flagged as enabled."""
+        session = get_client(config).session()
+        with _wrap(f"disabling account '{username}'"):
+            ok = session.disable_account(username)
+        flags = {}
+        try:
+            flags = _account_uac_flags(config, username)
+        except ADError:
+            pass
+        return {
+            "disabled": bool(ok),
+            "account": username,
+            "disabled_flag_after": flags.get("disabled"),
+            "note": "Account disabled (ACCOUNTDISABLE set). Existing logon "
+                    "sessions are not terminated immediately; the user cannot "
+                    "sign in again.",
         }
 
     @mcp.tool()

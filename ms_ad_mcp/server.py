@@ -90,10 +90,11 @@ def build_server(config=None):
         version=__version__,
         instructions=(
             "Tools to administer and troubleshoot a Microsoft Active Directory "
-            "domain: unlock accounts, reset/change passwords, create users, "
-            "list group memberships (with descriptions), add users to groups, "
-            "look up a manager's details/email, search computer accounts to "
-            "validate AD-join status, and run reverse-DNS lookups. Usernames "
+            "domain: unlock accounts, enable/disable accounts, reset/change "
+            "passwords, create users, list group memberships (with "
+            "descriptions), add users to groups, look up a manager's "
+            "details/email, search computer accounts to validate AD-join "
+            "status, and run reverse-DNS lookups. Usernames "
             "are sAMAccountNames; confirm exact spelling against AD before "
             "mutating an account."
         ),

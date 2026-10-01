@@ -20,6 +20,8 @@ to one connection per domain.
 Account management
 
 - `unlock_account` — unlock a locked-out user or computer account
+- `enable_account` — re-enable a disabled account (clears ACCOUNTDISABLE)
+- `disable_account` — disable an account **without deleting it** (sets ACCOUNTDISABLE; the object and its group memberships are retained)
 - `reset_password` — admin/shared-force password reset (no old password needed)
 - `change_password` — change password after verifying the current one
 - `create_user` — create a new user (username, password, name, email, dept, …)
