@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import datetime as _dt
+import uuid as _uuid
 from typing import TYPE_CHECKING, Dict, List, Optional
 
 if TYPE_CHECKING:  # pragma: no cover
@@ -15,6 +16,9 @@ USER_INFO_ATTRS = [
     "department", "telephoneNumber", "description",
     "lastLogon", "lastLogonTimestamp", "whenChanged", "userAccountControl",
     "lockoutTime",
+    # Immutable object identity: objectGUID (raw-byte hex) + objectSid. Needed
+    # by directory-aware consumers (e.g. PrinterLogic AD-object deployments).
+    "objectGUID", "objectSid",
 ]
 GROUP_INFO_ATTRS = ["description", "displayName", "mail"]
 COMPUTER_INFO_ATTRS = [
@@ -151,6 +155,49 @@ def uac_flags(value: object, lockout_time: object = None) -> Dict[str, bool]:
     }
 
 
+def format_object_guid(value: object) -> Optional[Dict[str, str]]:
+    """Normalise an AD ``objectGUID`` to both wire forms.
+
+    Returns ``{"raw": <32 hex, raw byte order, no dashes>, "canonical":
+    <dashed UUID>}`` or ``None``. The **raw** form is what PrinterLogic (and
+    similar tools) expect: ``uuid.UUID(...).bytes_le.hex()`` -- AD stores the
+    first three GUID fields little-endian on the wire."""
+    if value is None:
+        return None
+    try:
+        if isinstance(value, _uuid.UUID):
+            u = value
+        elif isinstance(value, (bytes, bytearray)):
+            b = bytes(value)
+            u = _uuid.UUID(bytes_le=b) if len(b) == 16 else _uuid.UUID(bytes=b)
+        else:
+            u = _uuid.UUID(str(value).strip().strip("{}"))
+    except (ValueError, TypeError, AttributeError):
+        return None
+    return {"raw": u.bytes_le.hex(), "canonical": str(u)}
+
+
+def format_object_sid(value: object) -> Optional[str]:
+    """Normalise an AD ``objectSid`` to ``S-1-5-21-...`` string form.
+
+    Handles the raw binary SID (revision, subauthority count, 6-byte
+    big-endian identifier authority, little-endian subauthorities) as well as
+    already-formatted strings."""
+    if value is None:
+        return None
+    if isinstance(value, (bytes, bytearray)):
+        b = bytes(value)
+        if len(b) < 8:
+            return None
+        rev = b[0]
+        nsub = b[1]
+        idauth = int.from_bytes(b[2:8], "big")
+        subs = [int.from_bytes(b[8 + 4 * i:12 + 4 * i], "little")
+                for i in range(nsub)]
+        return "-".join(["S", str(rev), str(idauth)] + [str(x) for x in subs])
+    return str(value)
+
+
 def summarize_object(obj: ADObject, *extra: str) -> Dict[str, object]:
     """Build a compact summary from an AD object's name/location/attrs."""
     out: Dict[str, object] = {
@@ -180,6 +227,13 @@ def summarize_user(user: ADUser, include_uac: bool = True) -> Dict[str, object]:
     if include_uac:
         out["account_flags"] = uac_flags(user.get("userAccountControl"),
                                          user.get("lockoutTime"))
+    guid = format_object_guid(user.get("objectGUID"))
+    if guid:
+        out["objectGUID"] = guid["raw"]
+        out["objectGUID_canonical"] = guid["canonical"]
+    sid = format_object_sid(user.get("objectSid"))
+    if sid:
+        out["objectSid"] = sid
     return out
 
 
