@@ -32,6 +32,7 @@ Directory
 - `find_computer` — look up a computer account to validate its **AD-join status**
 - `user_group_memberships` — a user's groups **including each group's description**
 - `add_user_to_group` — add a user to a group (e.g. `linux-admins`)
+- `remove_user_from_group` — remove a user from a group (reverse of `add_user_to_group`)
 - `get_manager` — a user's manager details **including the manager's email**
 
 Network / host

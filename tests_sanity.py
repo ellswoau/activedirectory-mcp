@@ -129,7 +129,8 @@ def test_tool_registration():
         "unlock_account", "enable_account", "disable_account",
         "reset_password", "change_password", "create_user",
         "find_user", "find_computer", "user_group_memberships",
-        "add_user_to_group", "get_manager", "reverse_dns_lookup",
+        "add_user_to_group", "remove_user_from_group", "get_manager",
+        "reverse_dns_lookup",
         "last_logon_for_hostname", "ad_ping", "ad_config",
     }
     assert required <= names, f"missing tools: {required - names}"
@@ -209,6 +210,43 @@ def test_disable_account_tool():
     assert out["disabled"] is True
     assert out["account"] == "jsmith"
     assert out["disabled_flag_after"] == uac_flags(0x2, 0)["disabled"]
+
+
+class _FakeGroupSession:
+    def __init__(self):
+        self.calls = []
+
+    def add_users_to_groups(self, users, groups):
+        self.calls.append(("add_users_to_groups", list(users), list(groups)))
+        return list(groups)
+
+    def remove_users_from_groups(self, users, groups):
+        self.calls.append(("remove_users_from_groups", list(users), list(groups)))
+        return list(groups)
+
+
+def _call_directory_tool(tool_name, *args):
+    """Invoke a directory tool against a fake session; return (out, session)."""
+    import unittest.mock as mock
+    cfg = load_config()
+    mcp = build_server(config=cfg)
+    fn = _account_tool(mcp, tool_name)
+    session = _FakeGroupSession()
+    with mock.patch("ms_ad_mcp.tools.directory_tools.get_client",
+                    return_value=_FakeClient(session)):
+        out = fn(*args)
+    return out, session
+
+
+def test_remove_user_from_group_tool():
+    out, session = _call_directory_tool(
+        "remove_user_from_group", "jsmith", "linux-admins")
+    assert session.calls == [
+        ("remove_users_from_groups", ["jsmith"], ["linux-admins"])
+    ], session.calls
+    assert out["removed"] is True
+    assert out["username"] == "jsmith"
+    assert out["group"] == "linux-admins"
 
 
 def test_reverse_dns_smoke():

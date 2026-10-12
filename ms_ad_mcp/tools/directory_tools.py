@@ -1,5 +1,5 @@
-"""Directory tools: user/computer lookup, group memberships, add-to-group and
-manager information."""
+"""Directory tools: user/computer lookup, group memberships, add/remove from
+group and manager information."""
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, List
@@ -97,6 +97,23 @@ def register(mcp: "FastMCP", config: "ADConfig") -> None:
             "username": username,
             "group": group_name,
             "note": "Membership applied; verify with user_group_memberships.",
+        }
+
+    @mcp.tool()
+    def remove_user_from_group(username: str, group_name: str) -> dict:
+        """Remove a user from an AD group by sAMAccountName (e.g.
+        ``linux-admins``). This is the reverse of add_user_to_group: it strips
+        the user's ``member`` entry from the group and does not touch anything
+        else on the account. The service account needs member-write rights on
+        the group. Returns the group and confirms the removal was applied."""
+        session = get_client(config).session()
+        with _wrap(f"removing '{username}' from group '{group_name}'"):
+            session.remove_users_from_groups([username], [group_name])
+        return {
+            "removed": True,
+            "username": username,
+            "group": group_name,
+            "note": "Membership removed; verify with user_group_memberships.",
         }
 
     @mcp.tool()
